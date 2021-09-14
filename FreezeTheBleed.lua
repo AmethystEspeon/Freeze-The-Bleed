@@ -9,114 +9,58 @@ if ( class ~= "DRUID") then
     return;
 end
 
-local SPELL_RIP_ID = 1079;
+local SPELL_TIGERS_LUST_ID = 5217;
+local SPELL_BLOODTALONS_ID = 145152;
 
-FreezeTheBleed = CreateFrame("GameTooltip","FreezeTheBleed",UIParent,"GameTooltipTemplate")
-FreezeTheBleed.cachedUnits = {};
+FreezeTheBleed = CreateFrame("Frame",nil,UIParent)
+FreezeTheBleed.cachedUnits = {}
 
 function FreezeTheBleed:getOldBleed(unit)
-    --if unit then
-        local guid = UnitGUID(unit);
-        local now = GetTime();
-        if self.cachedUnits[guid] and self.cachedUnits[guid].lastCalculated and now - self.cachedUnits[guid].lastCalculated < 0.1 then
-            --debugPrint("early out", now - self.cachedUnits[guid].lastCalculated)
-            return self.cachedUnits[guid].storedBleed
-        end
-        local tooltipText = self:getTooltipFromEnemy(unit, SPELL_RIP_ID,"TextLeft2")
-        --debugPrint(tooltipText)
-        self.cachedUnits[guid] = self.cachedUnits[guid] or {};
-        self.cachedUnits[guid].storedBleed = self:getOldDamageFromTooltip(tooltipText)
-        self.cachedUnits[guid].lastCalculated = now
-        return self.cachedUnits[guid].storedBleed
-    --end
+    local guid = UnitGUID(unit)
+    self.cachedUnits[guid] = self.cachedUnits[guid] or {}
+    local tigersResult = self.cachedUnits[guid].tigersLust or 0
+    local bloodTalons = self.cachedUnits[guid].bloodTalons or 0
+    
+    return tigersResult, bloodTalons
 end
 
 function FreezeTheBleed:getNewBleed()
     local now = GetTime();
-    if self.lastCalculated and now - self.lastCalculated < 0.1 then
-        --debugPrint("time potential damage calculated last:", now - self.lastCalculated)
-        return self.potentialDamage
+    if self.potentialBuffs and self.potentialBuffs.tigersLust and self.potentialBuffs.bloodTalons and self.lastCalculated and now - self.lastCalculated < 0.1 then
+        return self.potentialBuffs.tigersLust, self.potentialBuffs.bloodTalons
     end
-    local tooltipText = self:getTooltipFromSelf(SPELL_RIP_ID,"TextLeft5")
-    if not string.match(tooltipText,"Bleed") then
-        tooltipText = self:getTooltipFromSelf(SPELL_RIP_ID,"TextLeft6") --IF GCD is on, then the line moves down one
-    end
-    --debugPrint("Tooltip", tooltipText)
-    self.potentialDamage = self:getNewDamageFromTooltip(tooltipText)
+    self.potentialBuffs = self.potentialBuffs or {}
+    self.potentialBuffs.tigersLust = self:checkCurrentBuff("player",SPELL_TIGERS_LUST_ID,"player")
+    self.potentialBuffs.bloodTalons = self:checkCurrentBuff("player",SPELL_BLOODTALONS_ID,"player")
     self.lastCalculated = now
-    --debugPrint("New Bleed: ", self.potentialDamage)
-    return self.potentialDamage
+
+    return self.potentialBuffs.tigersLust, self.potentialBuffs.bloodTalons
+
 end
 
-function FreezeTheBleed:getTooltipFromEnemy(unit, spellID,textLine)
-    self:SetOwner(UIParent, "ANCHOR_NONE");
-    local debuffIndex = self:getDebuffIndex(unit,spellID)
-    if debuffIndex == 0 then
-        return nil --Early out
+function FreezeTheBleed:setOldBleed(guid)
+    self.cachedUnits[guid] = self.cachedUnits[guid] or {}
+    self.cachedUnits[guid].tigersLust = self.potentialBuffs.tigersLust or 0
+    self.cachedUnits[guid].bloodTalons = self.potentialBuffs.bloodTalons or 0
+end
+
+function FreezeTheBleed:resetBleed(guid)
+    if not guid then
+        return
     end
-    self:SetUnitDebuff(unit,debuffIndex,"PLAYER");
-    self:Show()
-    local fontstring = self:getTooltipText(textLine)
-    local text = fontstring:GetText()
-    return text
+    self.cachedUnits[guid] = self.cachedUnits[guid] or {}
+    self.cachedUnits[guid].tigersLust = 0
+    self.cachedUnits[guid].bloodTalons = 0
 end
 
-function FreezeTheBleed:getTooltipFromSelf(spellID,textLine)
-    self:SetOwner(UIParent, "ANCHOR_NONE");
-    self:SetSpellByID(spellID)
-    self:Show()
-    local fontstring = self:getTooltipText(textLine)
-    --debugPrint("fontstring ", fontstring)
-    local text = fontstring:GetText()
-    return text
-end
-
-function FreezeTheBleed:getOldDamageFromTooltip(tooltipText)
-    if tooltipText then
-        local tickDamage, tickRate = string.match(tooltipText,"Bleeding for (%d*,?%d+) damage every (%d*%.?%d+) sec")
-        tickDamage = tickDamage:gsub(",","")
-        local dps = self:calculateDPS(tickDamage,tickRate)
-        return dps
-    end
-end
-
-function FreezeTheBleed:getNewDamageFromTooltip(tooltipText)
-    if tooltipText then
-        local totalDamage, totalTime = string.match(tooltipText,"5 points: (%d*,?%d+) over (%d*,?%d+) sec")
-        --debugPrint("Full Damage and Time:", totalDamage, totalTime)
-        if totalDamage and totalTime then
-            totalDamage = totalDamage:gsub(",","")
-            totalTime = totalTime:gsub(",","")
-        else
-        end
-        --debugPrint("Removed damage & time:", totalDamage, totalTime)
-        local dps = self:calculateDPS(totalDamage,totalTime)
-        return dps
-    end
-end
-
-function FreezeTheBleed:calculateDPS(damage,time)
-    if damage and time then
-        local dps = damage/time
-        return dps
-    end
-end
-
-function FreezeTheBleed:getDebuffIndex(unit, searchID)
-    for i=1,40, 1 do
-        local _, _, _, _, _, _, _, _, _, spellID = UnitDebuff(unit, i, "PLAYER");
+function FreezeTheBleed:checkCurrentBuff(unit, searchID, filter)
+    for i=1,40,1 do
+        local _, _, _, _, _, _, _, _, _, spellID = UnitBuff(unit,i,filter)
         if spellID == nil then
             return 0
         end
-
         if spellID == searchID then
-            return i
+            return 1
         end
     end
-end
-
-function FreezeTheBleed:getTooltipText(line)
-    --debugPrint(self:GetName())
-    --debugPrint(_G[self:GetName()..line]:GetText())
-    return _G[self:GetName()..line]
 end
